@@ -16,6 +16,7 @@ const html = `<!doctype html>
   <p>Environment: <strong>${envName}</strong></p>
   <p>Commit: <code>${sha}</code></p>
   <p>Built: ${buildTime}</p>
+  <p>👋 This line was added to test the CI/CD pipeline.</p>
 </body>
 </html>
 `;

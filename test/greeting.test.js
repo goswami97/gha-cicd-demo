@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { greet } from '../src/greeting.js';
 
 test('greets by name', () => {
-  assert.equal(greet('World'), 'Hello, World! Deployed via GitHub Actions.');
+  assert.equal(greet('World'), 'Hello, World! Deployed via GitHub Actions. This is v1');
 });
 
 test('throws without a name', () => {
