@@ -111,14 +111,15 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
+      pull-requests: read
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.DEPLOY_PAT }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
+          token: ${{ secrets.DEPLOY_PAT }}
       - name: Bump image tag in k8s manifest
         run: |
           sed -i "s|image: ghcr.io/.*|image: ${{ needs.docker-build-scan-push.outputs.image }}|" k8s/deployment.yaml
