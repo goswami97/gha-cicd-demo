@@ -119,13 +119,13 @@ jobs:
           token: ${{ secrets.DEPLOY_PAT }}
       - name: Bump image tag and push
         run: |
-          sed -i "s|image: ghcr.io/.*|image: ${{ needs.docker-build-scan-push.outputs.image }}|" deployment.yaml
+          sed -i "s|image: ghcr.io/.*|image: ${{ needs.docker-build-scan-push.outputs.image }}|" staging/deployment.yaml
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add deployment.yaml
+          git add staging/deployment.yaml
           if git diff --staged --quiet; then
             echo "No manifest change, skipping."
             exit 0
           fi
-          git commit -m "chore: deploy gha-cicd-demo@${{ github.sha }}"
+          git commit -m "chore: deploy staging gha-cicd-demo@${{ github.sha }}"
           git push origin main

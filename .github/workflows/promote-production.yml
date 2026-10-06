@@ -1,0 +1,50 @@
+name: Promote to Production
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to promote (commit SHA). Defaults to the tag currently deployed in staging.'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      GH_TOKEN: ${{ secrets.DEPLOY_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: goswami97/gha-cicd-demo-manifests
+          token: ${{ secrets.DEPLOY_PAT }}
+      - name: Resolve image to promote
+        id: resolve
+        run: |
+          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            IMAGE="ghcr.io/goswami97/gha-cicd-demo:${{ github.event.inputs.image_tag }}"
+          else
+            IMAGE=$(grep -oP '(?<=image: ).*' staging/deployment.yaml)
+          fi
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+      - name: Bump production manifest and push
+        run: |
+          sed -i "s|image: ghcr.io/.*|image: ${{ steps.resolve.outputs.image }}|" production/deployment.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add production/deployment.yaml
+          if git diff --staged --quiet; then
+            echo "No manifest change, skipping."
+            exit 0
+          fi
+          git commit -m "chore: promote ${{ steps.resolve.outputs.image }} to production"
+          git push origin main
+      - name: Next step
+        run: |
+          echo "Manifest updated. gha-cicd-demo-production is a manual-sync ArgoCD Application."
+          echo "Sync it via the ArgoCD UI, or: kubectl patch application gha-cicd-demo-production -n argocd --type merge -p '{\"operation\":{\"sync\":{}}}'"
