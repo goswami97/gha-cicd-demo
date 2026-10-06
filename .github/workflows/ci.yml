@@ -131,7 +131,7 @@ jobs:
             echo "No manifest change, skipping."
             exit 0
           fi
-          BRANCH="deploy/${{ github.sha }}"
+          BRANCH="deploy/${{ github.sha }}-${{ github.run_id }}"
           git checkout -b "$BRANCH"
           git commit -m "chore: deploy ${{ github.sha }}"
           git push origin "$BRANCH"
