@@ -1,6 +1,6 @@
 # gha-cicd-demo
 
-A learning project for a real-world GitHub Actions CI/CD + GitOps pipeline: lint/test/build, SonarCloud quality gate, Docker build, Trivy vulnerability scan, GHCR registry, and ArgoCD-based deployment to Kubernetes (minikube), with separate staging (auto) and production (manually-gated) environments.
+A learning project for a real-world GitHub Actions CI/CD + GitOps pipeline: lint/test/build, SonarCloud quality gate, Docker build, Trivy vulnerability scan, GHCR registry, and ArgoCD-based deployment to Kubernetes (minikube), with three environments: development (auto), qa (on-demand), and production (gated, promotes only from qa).
 
 ## Repos
 
@@ -21,19 +21,34 @@ Merge to main ──▶  CI (same jobs) ──▶ image pushed to GHCR
               update-manifest job
                       │
                       ▼
-      gha-cicd-demo-manifests: staging/deployment.yaml bumped
+    gha-cicd-demo-manifests: development/deployment.yaml bumped
                       │
                       ▼
-          ArgoCD auto-syncs (gha-cicd-demo app) ──▶ staging namespace (default)
+   ArgoCD auto-syncs (gha-cicd-demo-development) ──▶ development namespace
 
 
-Promotion (manual):
+Promote to QA (on-demand, whenever QA wants to pull a build):
+  workflow_dispatch (optional image_tag input, defaults to development's current tag)
+                      │
+      image existence verified against GHCR before writing anything
+                      │
+                      ▼
+       gha-cicd-demo-manifests: qa/deployment.yaml bumped
+                      │
+                      ▼
+      ArgoCD auto-syncs (gha-cicd-demo-qa) ──▶ qa namespace
+
+
+Promote to Production (gated — only ever promotes what QA validated):
   git tag vX.Y.Z && git push origin vX.Y.Z   (or workflow_dispatch)
                       │
          GitHub "production" environment approval required
                       │
+      image existence verified against GHCR before writing anything
+                      │
                       ▼
       gha-cicd-demo-manifests: production/deployment.yaml bumped
+   (defaults to QA's current tag, not development's — prod can't skip QA)
                       │
                       ▼
    ArgoCD does NOT auto-sync — manual `argocd app sync gha-cicd-demo-production`
@@ -46,10 +61,14 @@ Promotion (manual):
   - `lint`, `test`, `build` — required status checks for branch protection
   - `sonar` — SonarCloud quality gate (needs `SONAR_TOKEN` secret; **Automatic Analysis must be disabled** on sonarcloud.io or it conflicts with CI-based analysis)
   - `docker-build-scan-push` — builds the image, scans it with Trivy (fails on CRITICAL/HIGH CVEs), pushes to GHCR only on `push` events
-  - `update-manifest` — only on `push` to `main`; bumps `staging/deployment.yaml` in the manifests repo and pushes directly (no PR — that repo has no protection)
+  - `update-manifest` — only on `push` to `main`; bumps `development/deployment.yaml` in the manifests repo and pushes directly (no PR — that repo has no protection)
+- **`Promote to QA`** (`.github/workflows/promote-qa.yml`) — manual dispatch only, no tag needed (QA pulls builds on demand):
+  - Gated by the `qa` GitHub environment
+  - Verifies the resolved image actually exists in GHCR (`docker manifest inspect`) before writing anything — bumps `qa/deployment.yaml`
 - **`Promote to Production`** (`.github/workflows/promote-production.yml`) — on a `v*` tag or manual dispatch:
   - Gated by the `production` GitHub environment (required reviewer)
-  - Bumps `production/deployment.yaml` in the manifests repo to either the currently-deployed staging tag (default) or an explicit `image_tag` input — **the input must be a real commit SHA that was actually pushed to GHCR**, not an arbitrary version string
+  - Defaults to **QA's** currently-deployed tag (not development's) — production can never ship something QA didn't see
+  - Same GHCR existence check as `promote-qa` before writing `production/deployment.yaml` — an explicit `image_tag` input must be a real commit SHA that was actually pushed, not an arbitrary version string
 
 ## Secrets required
 
@@ -68,11 +87,12 @@ The manifests repo (`gha-cicd-demo-manifests`) has **no branch protection** — 
 
 ## ArgoCD
 
-Two Applications, both watching `gha-cicd-demo-manifests`:
+Three Applications, all watching `gha-cicd-demo-manifests`:
 
 | Application | Path | Namespace | Sync policy |
 |---|---|---|---|
-| `gha-cicd-demo` | `staging/` | `default` | Automated (prune + self-heal) |
+| `gha-cicd-demo-development` | `development/` | `development` | Automated (prune + self-heal) |
+| `gha-cicd-demo-qa` | `qa/` | `qa` | Automated (prune + self-heal) — deploy is on-demand (via `Promote to QA`), but once the manifest changes, ArgoCD applies it without another click |
 | `gha-cicd-demo-production` | `production/` | `production` | **Manual only** — `argocd app sync gha-cicd-demo-production` or via UI |
 
 ArgoCD UI: `kubectl port-forward svc/argocd-server -n argocd 8080:443`, then `https://localhost:8080` (admin password: `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`).
@@ -93,5 +113,5 @@ Same fix applies to ArgoCD's `repo-server` pod trusting GitHub — add the cert 
 2. **`GITHUB_TOKEN`-authored pushes don't trigger downstream workflows** — GitHub's anti-recursion guard. If `update-manifest`'s auto-created PR needs its own CI to run (for required-status-check gating), it must push using a PAT, not the default token.
 3. **SonarCloud "Automatic Analysis" conflicts with CI-based analysis** — must be disabled per-project on sonarcloud.io or every CI scan fails with `EXECUTION FAILURE`.
 4. **Required status checks must match job names, not the workflow name** — `context: "CI"` never satisfies anything; it must be `lint`/`test`/`build` etc.
-5. **Promotion `image_tag` input must be a real GHCR tag** — typing `v1.0.0` when the pipeline only ever tags images by commit SHA silently writes a broken image reference into the production manifest (ArgoCD then shows `ImagePullBackOff`).
+5. **Promotion `image_tag` input must be a real GHCR tag** — typing `v1.0.0` when the pipeline only ever tags images by commit SHA silently wrote a broken image reference into the production manifest once (ArgoCD then showed `ImagePullBackOff`). Fixed by validating with `docker manifest inspect` before writing the manifest in both `promote-qa` and `promote-production` — a bad tag now fails the workflow loudly instead of corrupting the manifest.
 6. **`actions/checkout` in a `workflow_run`-triggered job defaults to the default branch tip, not the commit that triggered the original run** — always pin `ref: ${{ github.event.workflow_run.head_sha }}` explicitly.
