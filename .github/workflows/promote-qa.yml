@@ -1,4 +1,5 @@
 name: Promote to QA
+run-name: "Promote to QA (${{ github.event_name == 'workflow_run' && 'auto after dev deploy' || 'manual dispatch' }})"
 
 on:
   workflow_run:
