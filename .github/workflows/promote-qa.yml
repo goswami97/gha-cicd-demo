@@ -1,12 +1,10 @@
-name: Promote to Production
+name: Promote to QA
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'Image tag to promote (commit SHA). Defaults to the tag currently deployed in qa.'
+        description: 'Image tag to promote (commit SHA). Defaults to the tag currently deployed in development.'
         required: false
 
 permissions:
@@ -15,7 +13,7 @@ permissions:
 jobs:
   promote:
     runs-on: ubuntu-latest
-    environment: production
+    environment: qa
     env:
       GH_TOKEN: ${{ secrets.DEPLOY_PAT }}
     steps:
@@ -29,7 +27,7 @@ jobs:
           if [ -n "${{ github.event.inputs.image_tag }}" ]; then
             IMAGE="ghcr.io/goswami97/gha-cicd-demo:${{ github.event.inputs.image_tag }}"
           else
-            IMAGE=$(grep -oP '(?<=image: ).*' qa/deployment.yaml)
+            IMAGE=$(grep -oP '(?<=image: ).*' development/deployment.yaml)
           fi
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
       - name: Verify image actually exists in GHCR
@@ -38,19 +36,15 @@ jobs:
             echo "::error::${{ steps.resolve.outputs.image }} does not exist in GHCR. Refusing to promote a non-existent image."
             exit 1
           fi
-      - name: Bump production manifest and push
+      - name: Bump qa manifest and push
         run: |
-          sed -i "s|image: ghcr.io/.*|image: ${{ steps.resolve.outputs.image }}|" production/deployment.yaml
+          sed -i "s|image: ghcr.io/.*|image: ${{ steps.resolve.outputs.image }}|" qa/deployment.yaml
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add production/deployment.yaml
+          git add qa/deployment.yaml
           if git diff --staged --quiet; then
             echo "No manifest change, skipping."
             exit 0
           fi
-          git commit -m "chore: promote ${{ steps.resolve.outputs.image }} to production"
+          git commit -m "chore: promote ${{ steps.resolve.outputs.image }} to qa"
           git push origin main
-      - name: Next step
-        run: |
-          echo "Manifest updated. gha-cicd-demo-production is a manual-sync ArgoCD Application."
-          echo "Sync it via the ArgoCD UI, or: kubectl patch application gha-cicd-demo-production -n argocd --type merge -p '{\"operation\":{\"sync\":{}}}'"
