@@ -27,8 +27,11 @@ Merge to main ──▶  CI (same jobs) ──▶ image pushed to GHCR
    ArgoCD auto-syncs (gha-cicd-demo-development) ──▶ development namespace
 
 
-Promote to QA (on-demand, whenever QA wants to pull a build):
-  workflow_dispatch (optional image_tag input, defaults to development's current tag)
+Promote to QA (auto-triggered after every successful development deploy,
+               OR manual workflow_dispatch for an ad-hoc tag):
+  CI succeeds on main ──▶ Promote to QA fires automatically
+                      │
+         GitHub "qa" environment approval required (pauses here)
                       │
       image existence verified against GHCR before writing anything
                       │
@@ -62,8 +65,8 @@ Promote to Production (gated — only ever promotes what QA validated):
   - `sonar` — SonarCloud quality gate (needs `SONAR_TOKEN` secret; **Automatic Analysis must be disabled** on sonarcloud.io or it conflicts with CI-based analysis)
   - `docker-build-scan-push` — builds the image, scans it with Trivy (fails on CRITICAL/HIGH CVEs), pushes to GHCR only on `push` events
   - `update-manifest` — only on `push` to `main`; bumps `development/deployment.yaml` in the manifests repo and pushes directly (no PR — that repo has no protection)
-- **`Promote to QA`** (`.github/workflows/promote-qa.yml`) — manual dispatch only, no tag needed (QA pulls builds on demand):
-  - Gated by the `qa` GitHub environment
+- **`Promote to QA`** (`.github/workflows/promote-qa.yml`) — auto-triggers whenever `CI` succeeds on `main` (i.e. right after a development deploy), or manual dispatch for an ad-hoc tag:
+  - Gated by the `qa` GitHub environment (required reviewer — pauses here regardless of trigger type)
   - Verifies the resolved image actually exists in GHCR (`docker manifest inspect`) before writing anything — bumps `qa/deployment.yaml`
 - **`Promote to Production`** (`.github/workflows/promote-production.yml`) — on a `v*` tag or manual dispatch:
   - Gated by the `production` GitHub environment (required reviewer)
@@ -92,7 +95,7 @@ Three Applications, all watching `gha-cicd-demo-manifests`:
 | Application | Path | Namespace | Sync policy |
 |---|---|---|---|
 | `gha-cicd-demo-development` | `development/` | `development` | Automated (prune + self-heal) |
-| `gha-cicd-demo-qa` | `qa/` | `qa` | Automated (prune + self-heal) — deploy is on-demand (via `Promote to QA`), but once the manifest changes, ArgoCD applies it without another click |
+| `gha-cicd-demo-qa` | `qa/` | `qa` | Automated (prune + self-heal) — the gate is the GitHub `qa` environment approval on `Promote to QA`, not ArgoCD itself; once that manifest changes, ArgoCD applies it without another click |
 | `gha-cicd-demo-production` | `production/` | `production` | **Manual only** — `argocd app sync gha-cicd-demo-production` or via UI |
 
 ArgoCD UI: `kubectl port-forward svc/argocd-server -n argocd 8080:443`, then `https://localhost:8080` (admin password: `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`).
@@ -115,3 +118,4 @@ Same fix applies to ArgoCD's `repo-server` pod trusting GitHub — add the cert 
 4. **Required status checks must match job names, not the workflow name** — `context: "CI"` never satisfies anything; it must be `lint`/`test`/`build` etc.
 5. **Promotion `image_tag` input must be a real GHCR tag** — typing `v1.0.0` when the pipeline only ever tags images by commit SHA silently wrote a broken image reference into the production manifest once (ArgoCD then showed `ImagePullBackOff`). Fixed by validating with `docker manifest inspect` before writing the manifest in both `promote-qa` and `promote-production` — a bad tag now fails the workflow loudly instead of corrupting the manifest.
 6. **`actions/checkout` in a `workflow_run`-triggered job defaults to the default branch tip, not the commit that triggered the original run** — always pin `ref: ${{ github.event.workflow_run.head_sha }}` explicitly.
+7. **`Promote to QA` auto-triggers on every successful `CI` run on `main`**, including doc-only or workflow-only changes that didn't actually change app code — each one still prompts a `qa` environment approval request. Harmless (the `git diff --staged --quiet` check skips the commit if the image tag didn't actually change), but it does mean an approval notification can fire for a no-op promotion.
