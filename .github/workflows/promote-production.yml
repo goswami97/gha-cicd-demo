@@ -14,7 +14,46 @@ permissions:
   contents: read
 
 jobs:
+  # Resolves and validates the image before the production approval gate, so a bad tag
+  # fails immediately instead of after someone has approved it.
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.resolve.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: goswami97/gha-cicd-demo-manifests
+          token: ${{ secrets.DEPLOY_PAT }}
+      - name: Resolve image to promote
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          QA_IMAGE=$(grep -oP '(?<=image: ).*' qa/deployment.yaml)
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            # A release tag must ship the commit it points at, and only once QA is running that commit.
+            TAG_SHA=$(gh api "repos/${{ github.repository }}/commits/${{ github.ref }}" --jq .sha)
+            IMAGE="ghcr.io/goswami97/gha-cicd-demo:$TAG_SHA"
+            if [ "$IMAGE" != "$QA_IMAGE" ]; then
+              echo "::error::${{ github.ref_name }} points at $TAG_SHA, but qa is running $QA_IMAGE. Promote $TAG_SHA to qa first, then re-run this workflow."
+              exit 1
+            fi
+          elif [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            IMAGE="ghcr.io/goswami97/gha-cicd-demo:${{ github.event.inputs.image_tag }}"
+          else
+            IMAGE="$QA_IMAGE"
+          fi
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+      - name: Verify image actually exists in GHCR
+        run: |
+          if ! docker manifest inspect "${{ steps.resolve.outputs.image }}" > /dev/null 2>&1; then
+            echo "::error::${{ steps.resolve.outputs.image }} does not exist in GHCR. Refusing to promote a non-existent image."
+            exit 1
+          fi
+
   promote:
+    needs: resolve
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -24,24 +63,9 @@ jobs:
         with:
           repository: goswami97/gha-cicd-demo-manifests
           token: ${{ secrets.DEPLOY_PAT }}
-      - name: Resolve image to promote
-        id: resolve
-        run: |
-          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
-            IMAGE="ghcr.io/goswami97/gha-cicd-demo:${{ github.event.inputs.image_tag }}"
-          else
-            IMAGE=$(grep -oP '(?<=image: ).*' qa/deployment.yaml)
-          fi
-          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
-      - name: Verify image actually exists in GHCR
-        run: |
-          if ! docker manifest inspect "${{ steps.resolve.outputs.image }}" > /dev/null 2>&1; then
-            echo "::error::${{ steps.resolve.outputs.image }} does not exist in GHCR. Refusing to promote a non-existent image."
-            exit 1
-          fi
       - name: Bump production manifest and push
         run: |
-          sed -i "s|image: ghcr.io/.*|image: ${{ steps.resolve.outputs.image }}|" production/deployment.yaml
+          sed -i "s|image: ghcr.io/.*|image: ${{ needs.resolve.outputs.image }}|" production/deployment.yaml
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add production/deployment.yaml
@@ -49,8 +73,15 @@ jobs:
             echo "No manifest change, skipping."
             exit 0
           fi
-          git commit -m "chore: promote ${{ steps.resolve.outputs.image }} to production"
-          git push origin main
+          git commit -m "chore: promote ${{ needs.resolve.outputs.image }} to production"
+          # update-manifest and promote-qa push to the same repo; each touches a different file, so a rebase never conflicts.
+          for attempt in 1 2 3 4 5; do
+            git push origin main && exit 0
+            echo "Push rejected (attempt $attempt), rebasing onto latest main..."
+            git pull --rebase origin main
+          done
+          echo "::error::Could not push manifest update after 5 attempts."
+          exit 1
       - name: Next step
         run: |
           echo "Manifest updated. gha-cicd-demo-production is a manual-sync ArgoCD Application."

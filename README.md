@@ -62,8 +62,8 @@ Promote to Production (gated — only ever promotes what QA validated):
 
 - **`CI`** (`.github/workflows/ci.yml`) — runs on every PR and push to `main`:
   - `lint`, `test`, `build` — required status checks for branch protection
-  - `sonar` — SonarCloud quality gate (needs `SONAR_TOKEN` secret; **Automatic Analysis must be disabled** on sonarcloud.io or it conflicts with CI-based analysis)
-  - `docker-build-scan-push` — builds the image, scans it with Trivy (fails on CRITICAL/HIGH CVEs), pushes to GHCR only on `push` events
+  - `sonar` — SonarCloud quality gate (`sonar.qualitygate.wait=true`, so a failed gate fails the job; needs `SONAR_TOKEN` secret; **Automatic Analysis must be disabled** on sonarcloud.io or it conflicts with CI-based analysis)
+  - `docker-build-scan-push` — needs `build` **and** `sonar`, so nothing reaches GHCR or development without passing the quality gate. Builds the image (commit SHA baked in via the `GIT_SHA` build arg; the environment name is injected at container start from the Deployment's `DEPLOY_ENV`, since one image is promoted through all three tiers), scans it with Trivy (fails on CRITICAL/HIGH CVEs), pushes to GHCR only on `push` events
   - `update-manifest` — only on `push` to `main`; bumps `development/deployment.yaml` in the manifests repo and pushes directly (no PR — that repo has no protection)
 - **`Promote to QA`** (`.github/workflows/promote-qa.yml`) — auto-triggers whenever `CI` succeeds on `main` (i.e. right after a development deploy), or manual dispatch for an ad-hoc tag:
   - Gated by the `qa` GitHub environment (required reviewer — pauses here regardless of trigger type)
@@ -71,7 +71,10 @@ Promote to Production (gated — only ever promotes what QA validated):
 - **`Promote to Production`** (`.github/workflows/promote-production.yml`) — on a `v*` tag or manual dispatch:
   - Gated by the `production` GitHub environment (required reviewer)
   - Defaults to **QA's** currently-deployed tag (not development's) — production can never ship something QA didn't see
+  - On a `v*` tag, promotes the image for **the commit the tag points at**, and refuses (before the approval gate) unless QA is currently running that exact commit — promote it to QA first, then re-run
   - Same GHCR existence check as `promote-qa` before writing `production/deployment.yaml` — an explicit `image_tag` input must be a real commit SHA that was actually pushed, not an arbitrary version string
+
+Pushes to the manifests repo from all three workflows retry with `git pull --rebase` on rejection (each touches a different file, so rebases never conflict). CI only cancels superseded runs on PRs — runs on `main` queue instead, so a deploy is never killed mid-push.
 
 ## Secrets required
 
