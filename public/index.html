@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en" data-env="local">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Release Dashboard · gha-cicd-demo</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="banner">
+    <div class="wrap banner-row">
+      <div>
+        <p class="eyebrow" id="app-name">gha-cicd-demo</p>
+        <h1><span id="env-name">loading</span><span class="env-suffix"> environment</span></h1>
+        <p class="message" id="message" hidden></p>
+      </div>
+      <div class="health" id="health" data-state="unknown" role="status" aria-live="polite">
+        <span class="dot" aria-hidden="true"></span>
+        <span id="health-text">Checking…</span>
+      </div>
+    </div>
+    <div class="wrap">
+      <ol class="pipeline" aria-label="Promotion path">
+        <li data-stage="development"><span class="step">1</span>development</li>
+        <li data-stage="qa"><span class="step">2</span>qa</li>
+        <li data-stage="production"><span class="step">3</span>production</li>
+      </ol>
+    </div>
+  </header>
+
+  <main class="wrap grid">
+    <section class="card">
+      <h2>Version</h2>
+      <p class="value" id="version">–</p>
+      <p class="sub" id="node">–</p>
+    </section>
+    <section class="card">
+      <h2>Commit</h2>
+      <p class="value mono"><a id="commit" target="_blank" rel="noopener noreferrer">–</a></p>
+      <p class="sub mono truncate" id="commit-full">–</p>
+    </section>
+    <section class="card">
+      <h2>Built</h2>
+      <p class="value" id="built-ago">–</p>
+      <p class="sub" id="built-at">–</p>
+    </section>
+    <section class="card">
+      <h2>Served by pod</h2>
+      <p class="value mono truncate" id="pod">–</p>
+      <p class="sub" id="requests">–</p>
+    </section>
+    <section class="card">
+      <h2>Uptime</h2>
+      <p class="value" id="uptime">–</p>
+      <p class="sub" id="started-at">–</p>
+    </section>
+    <section class="card card-chaos" id="chaos-card" hidden>
+      <h2>Chaos</h2>
+      <p class="sub">Make <code>/healthz</code> fail so Kubernetes restarts this pod.</p>
+      <button type="button" id="chaos-btn">Break this pod</button>
+    </section>
+  </main>
+
+  <footer class="wrap footer">
+    <nav aria-label="Endpoints">
+      <a href="/api/info">/api/info</a>
+      <a href="/healthz">/healthz</a>
+      <a href="/readyz">/readyz</a>
+      <a href="/metrics">/metrics</a>
+    </nav>
+    <span>Updated <span id="updated">–</span></span>
+  </footer>
+</body>
+</html>

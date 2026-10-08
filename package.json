@@ -1,12 +1,21 @@
 {
   "name": "gha-cicd-demo",
-  "version": "1.0.0",
-  "description": "Minimal Node app used to learn a real-world GitHub Actions CI/CD pipeline",
+  "version": "2.0.0",
+  "description": "Release dashboard app used to learn a real-world GitHub Actions CI/CD + GitOps pipeline",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/goswami97/gha-cicd-demo"
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "lint": "eslint src test",
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "lint": "eslint src public scripts test",
     "test": "node --test \"test/**/*.test.js\"",
-    "build": "node src/build.js"
+    "build": "node scripts/build.js"
   },
   "devDependencies": {
     "eslint": "^9.9.0",
