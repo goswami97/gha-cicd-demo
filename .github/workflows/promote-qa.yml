@@ -53,4 +53,11 @@ jobs:
             exit 0
           fi
           git commit -m "chore: promote ${{ steps.resolve.outputs.image }} to qa"
-          git push origin main
+          # update-manifest and promote-production push to the same repo; each touches a different file, so a rebase never conflicts.
+          for attempt in 1 2 3 4 5; do
+            git push origin main && exit 0
+            echo "Push rejected (attempt $attempt), rebasing onto latest main..."
+            git pull --rebase origin main
+          done
+          echo "::error::Could not push manifest update after 5 attempts."
+          exit 1
