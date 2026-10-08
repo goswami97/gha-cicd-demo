@@ -15,7 +15,7 @@
     "dev": "node --watch src/index.js",
     "lint": "eslint src public scripts test",
     "test": "node --test \"test/**/*.test.js\"",
-    "test:coverage": "node --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info \"test/**/*.test.js\"",
+    "test:coverage": "mkdir -p coverage && node --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info \"test/**/*.test.js\"",
     "build": "node scripts/build.js"
   },
   "devDependencies": {
