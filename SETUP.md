@@ -21,28 +21,19 @@ Keep them separate from day one — don't build as one repo and split later (see
 ## 2. App code (in `gha-cicd-demo`)
 
 ```
-package.json          # scripts: lint, test ("node --test \"test/**/*.test.js\""), build
-src/greeting.js        # trivial greet(name) function
-src/build.js            # writes dist/index.html showing DEPLOY_ENV + GITHUB_SHA + build time
-test/greeting.test.js
+package.json            # scripts: start, dev, lint, test ("node --test \"test/**/*.test.js\""), build
+src/index.js            # entry point: HTTP server on $PORT (3000 locally, 8080 in the image) + graceful SIGTERM shutdown
+src/app.js              # routes: dashboard UI, /api/info, /healthz, /readyz, /metrics, POST /api/chaos
+src/config.js           # runtime config from env (DEPLOY_ENV, BANNER_MESSAGE, ALLOW_CHAOS)
+src/metrics.js          # tiny Prometheus text-format exporter
+public/                 # dashboard UI (index.html, styles.css, app.js)
+scripts/build.js        # assembles dist/ + build-info.json (commit SHA, build time)
+test/app.test.js
 eslint.config.js        # flat config — ESLint 9+ ignores .eslintrc.json
-Dockerfile
+Dockerfile, .dockerignore
 ```
 
-`Dockerfile`:
-```dockerfile
-FROM node:22-alpine AS build
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
-
-FROM nginx:alpine
-RUN apk update && apk upgrade --no-cache
-COPY --from=build /app/dist /usr/share/nginx/html
-EXPOSE 80
-```
+The app has no runtime npm dependencies (only `node:http`), so the image needs no `npm ci` and Trivy has very little to flag. See the repo's `Dockerfile`: a build stage runs `scripts/build.js`, and the runtime stage is `node:22-alpine` with npm/yarn removed, running as the built-in non-root `node` user on port 8080.
 
 Commit and push to `main` directly once (before branch protection exists in step 4).
 
@@ -108,7 +99,7 @@ production/deployment.yaml     # namespace: production, nodePort: 30081
 production/service.yaml
 ```
 
-Each `deployment.yaml` is a standard 2-replica Deployment with `image: ghcr.io/<you>/gha-cicd-demo:<some-initial-sha>` (any already-pushed tag). Each `service.yaml` is `type: NodePort` with the port above — **ports must differ per namespace**, NodePort is cluster-wide unique.
+Each `deployment.yaml` is a 2-replica Deployment with `image: ghcr.io/<you>/gha-cicd-demo:<some-initial-sha>` (any already-pushed tag), `DEPLOY_ENV` set to the environment name, a named `http` port on 8080, readiness (`/readyz`) and liveness (`/healthz`) probes, and a restricted `securityContext` (non-root, read-only root filesystem, all capabilities dropped). Services use `targetPort: http`. Each `service.yaml` is `type: NodePort` with the port above — **ports must differ per namespace**, NodePort is cluster-wide unique.
 
 ## 8. minikube + ArgoCD
 

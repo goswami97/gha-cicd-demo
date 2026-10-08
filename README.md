@@ -2,6 +2,38 @@
 
 A learning project for a real-world GitHub Actions CI/CD + GitOps pipeline: lint/test/build, SonarCloud quality gate, Docker build, Trivy vulnerability scan, GHCR registry, and ArgoCD-based deployment to Kubernetes (minikube), with three environments: development (auto), qa (on-demand), and production (gated, promotes only from qa).
 
+## The app: Release Dashboard
+
+A zero-dependency Node.js server (built-in `node:http` only) that shows what the pipeline deployed: environment (colour-coded — development blue, qa amber, production green), version, commit (linked to GitHub), build time, which pod served the request, uptime and live health.
+
+| Endpoint | Purpose |
+|---|---|
+| `/` | Dashboard UI |
+| `/api/info` | Same data as JSON — use it for post-deploy smoke tests |
+| `/healthz` | Liveness probe |
+| `/readyz` | Readiness probe — returns 503 during graceful shutdown (SIGTERM) |
+| `/metrics` | Prometheus metrics (`app_info`, `http_requests_total`, uptime, memory) |
+| `POST /api/chaos` | `{"failing": true}` makes `/healthz` fail so Kubernetes restarts the pod. Disabled in production unless `ALLOW_CHAOS=true` |
+
+Runtime config (env vars): `DEPLOY_ENV`, `PORT` (3000 locally; the image sets 8080), `BANNER_MESSAGE`, `ALLOW_CHAOS`. The commit SHA and build time are baked in at build time (`scripts/build.js` → `dist/build-info.json`); the environment is read at runtime, because one image is promoted through all three tiers.
+
+### Run locally
+
+```bash
+npm ci
+npm test && npm run lint
+npm run dev                                   # http://localhost:3000, restarts on file changes
+DEPLOY_ENV=qa BANNER_MESSAGE="hello" npm start  # preview another environment's look
+```
+
+In Docker, exactly as Kubernetes runs it (non-root, read-only filesystem). Host port 3000, because 8080 is taken by the ArgoCD port-forward:
+
+```bash
+docker build --build-arg GIT_SHA=$(git rev-parse HEAD) -t gha-cicd-demo:local .
+docker run --rm -p 3000:8080 -e DEPLOY_ENV=production --read-only --cap-drop ALL gha-cicd-demo:local
+trivy image --severity CRITICAL,HIGH gha-cicd-demo:local   # same scan CI runs
+```
+
 ## Repos
 
 | Repo | Purpose |
@@ -63,7 +95,7 @@ Promote to Production (gated — only ever promotes what QA validated):
 - **`CI`** (`.github/workflows/ci.yml`) — runs on every PR and push to `main`:
   - `lint`, `test`, `build` — required status checks for branch protection
   - `sonar` — SonarCloud quality gate (`sonar.qualitygate.wait=true`, so a failed gate fails the job; needs `SONAR_TOKEN` secret; **Automatic Analysis must be disabled** on sonarcloud.io or it conflicts with CI-based analysis)
-  - `docker-build-scan-push` — needs `build` **and** `sonar`, so nothing reaches GHCR or development without passing the quality gate. Builds the image (commit SHA baked in via the `GIT_SHA` build arg; the environment name is injected at container start from the Deployment's `DEPLOY_ENV`, since one image is promoted through all three tiers), scans it with Trivy (fails on CRITICAL/HIGH CVEs), pushes to GHCR only on `push` events
+  - `docker-build-scan-push` — needs `build` **and** `sonar`, so nothing reaches GHCR or development without passing the quality gate. Builds the image (commit SHA baked in via the `GIT_SHA` build arg; the environment is read at runtime from the Deployment's `DEPLOY_ENV`, since one image is promoted through all three tiers), scans it with Trivy (fails on CRITICAL/HIGH CVEs), pushes to GHCR only on `push` events
   - `update-manifest` — only on `push` to `main`; bumps `development/deployment.yaml` in the manifests repo and pushes directly (no PR — that repo has no protection)
 - **`Promote to QA`** (`.github/workflows/promote-qa.yml`) — auto-triggers whenever `CI` succeeds on `main` (i.e. right after a development deploy), or manual dispatch for an ad-hoc tag:
   - Gated by the `qa` GitHub environment (required reviewer — pauses here regardless of trigger type)
