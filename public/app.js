@@ -100,5 +100,6 @@ $('chaos-btn').addEventListener('click', async () => {
   }
 });
 
-refresh();
-setInterval(refresh, POLL_MS);
+// refresh() handles its own errors, so its promise is deliberately not awaited.
+void refresh();
+setInterval(() => void refresh(), POLL_MS);
