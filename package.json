@@ -1,6 +1,6 @@
 {
   "name": "gha-cicd-demo",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Release dashboard app used to learn a real-world GitHub Actions CI/CD + GitOps pipeline",
   "type": "module",
   "repository": {
